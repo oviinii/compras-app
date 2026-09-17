@@ -10,8 +10,11 @@ import {
   Sparkles,
   ShoppingBag,
   DollarSign,
-  Radio
+  Radio,
+  List,
+  Settings as SettingsIcon
 } from 'lucide-react'
+import Settings from './components/Settings'
 
 export interface Item {
   id: string
@@ -45,6 +48,8 @@ export default function App() {
   })
 
   const [connected, setConnected] = useState(false)
+
+  const [view, setView] = useState<'list' | 'settings'>('list')
 
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState<number>(1)
@@ -275,8 +280,9 @@ export default function App() {
             </div>
           </div>
 
-          {items.length > 0 && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {view === 'list' && items.length > 0 && (
+              <>
               <button
                 onClick={clearCompleted}
                 className="px-3 py-1.5 text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-lg transition"
@@ -289,10 +295,24 @@ export default function App() {
               >
                 Limpar Tudo
               </button>
-            </div>
-          )}
+              </>
+            )}
+            <button
+              onClick={() => setView(view === 'list' ? 'settings' : 'list')}
+              title={view === 'list' ? 'Abrir configurações' : 'Voltar para a lista'}
+              className={`p-2 rounded-lg transition ${
+                view === 'settings'
+                  ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800'
+              }`}
+            >
+              {view === 'list' ? <SettingsIcon className="w-5 h-5" /> : <List className="w-5 h-5" />}
+            </button>
+          </div>
         </header>
 
+        {view === 'list' ? (
+          <>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700/60 flex items-center gap-3">
             <div className="p-2.5 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-lg">
@@ -621,6 +641,10 @@ export default function App() {
             </ul>
           )}
         </div>
+          </>
+        ) : (
+          <Settings connected={connected} onBack={() => setView('list')} />
+        )}
       </div>
     </div>
   )
