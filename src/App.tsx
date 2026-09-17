@@ -41,6 +41,51 @@ const UNITS = ['un', 'kg', 'g', 'L', 'ml', 'pct', 'cx']
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3001' : ''
 
+const OUTBOX_KEY = 'compras_app_outbox'
+
+function enqueueOutbox(id: string) {
+  try {
+    const raw = localStorage.getItem(OUTBOX_KEY)
+    const ids: string[] = raw ? JSON.parse(raw) : []
+    if (!ids.includes(id)) {
+      ids.push(id)
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(ids))
+    }
+  } catch {}
+}
+
+async function flushOutbox(): Promise<void> {
+  try {
+    const raw = localStorage.getItem(OUTBOX_KEY)
+    if (!raw) return
+    const ids: string[] = JSON.parse(raw)
+    if (!ids.length) {
+      localStorage.removeItem(OUTBOX_KEY)
+      return
+    }
+    const current: Item[] = JSON.parse(localStorage.getItem('compras_app_items') || '[]')
+    for (const id of ids) {
+      const item = current.find((i) => i.id === id)
+      if (!item) continue
+      const res = await fetch(`${API_BASE}/api/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          category: item.category,
+          price: item.price
+        })
+      })
+      if (!res.ok) throw new Error('sync failed')
+    }
+    localStorage.removeItem(OUTBOX_KEY)
+  } catch {
+    // sem rede: tenta de novo na próxima reconexão
+  }
+}
+
 export default function App() {
   const [items, setItems] = useState<Item[]>(() => {
     const saved = localStorage.getItem('compras_app_items')
@@ -78,15 +123,54 @@ export default function App() {
     const wsUrl = `${protocol}//${host}`
 
     let ws: WebSocket | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let attempts = 0
+    let stopped = false
 
-    try {
-      ws = new WebSocket(wsUrl)
+    const syncFromServer = async () => {
+      await flushOutbox()
+      try {
+        const res = await fetch(`${API_BASE}/api/items`)
+        if (res.ok) {
+          const data: Item[] = await res.json()
+          setItems(data)
+        }
+      } catch {
+        // sem rede: mantém os dados locais
+      }
+    }
 
-      ws.onopen = () => setConnected(true)
-      ws.onclose = () => setConnected(false)
-      ws.onerror = () => setConnected(false)
+    const scheduleReconnect = () => {
+      if (stopped || retryTimer) return
+      const delay = Math.min(1000 * 2 ** attempts, 30000)
+      attempts += 1
+      retryTimer = setTimeout(() => {
+        retryTimer = null
+        connect()
+      }, delay)
+    }
 
-      ws.onmessage = (event) => {
+    const connect = () => {
+      if (stopped) return
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+        retryTimer = null
+      }
+      let socket: WebSocket
+      try {
+        socket = new WebSocket(wsUrl)
+      } catch {
+        scheduleReconnect()
+        return
+      }
+      ws = socket
+
+      socket.onopen = () => {
+        attempts = 0
+        setConnected(true)
+        void syncFromServer()
+      }
+      socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'INIT' || data.type === 'UPDATE') {
@@ -94,11 +178,45 @@ export default function App() {
           }
         } catch {}
       }
-    } catch {
-      setConnected(false)
+      socket.onclose = () => {
+        if (ws === socket) {
+          setConnected(false)
+          scheduleReconnect()
+        }
+      }
+      socket.onerror = () => {
+        socket.close()
+      }
     }
 
+    const handleOnline = () => {
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        attempts = 0
+        connect()
+      } else if (ws.readyState === WebSocket.OPEN) {
+        void syncFromServer()
+      }
+    }
+
+    const handleOffline = () => setConnected(false)
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleOnline()
+      }
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    document.addEventListener('visibilitychange', handleVisibility)
+    connect()
+
     return () => {
+      stopped = true
+      if (retryTimer) clearTimeout(retryTimer)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+      document.removeEventListener('visibilitychange', handleVisibility)
       ws?.close()
     }
   }, [])
@@ -129,6 +247,7 @@ export default function App() {
         completed: false
       }
       setItems((prev) => [localItem, ...prev])
+      enqueueOutbox(localItem.id)
     }
 
     setName('')

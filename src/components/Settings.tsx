@@ -122,6 +122,7 @@ export default function Settings({ connected, onBack }: SettingsProps) {
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Quando há conexão com o servidor, a lista atualiza em tempo real, incluindo itens enviados pelo Telegram.
+          Se a conexão cair, o app tenta reconectar sozinho e busca os itens novos ao voltar.
         </p>
       </div>
 
